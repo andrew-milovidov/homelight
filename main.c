@@ -3,15 +3,15 @@
 /*
 pd4 - выход 2
 pd3 - выход 1
-pd2 - вход с потенциометра 1
-pc7 - вход кнопка, Pull-up
+pd2 - резерв
+pc7 - вход кнопка 1, Pull-up, меню
 pc6 - вход с датчика 1
 pc5 - вход с датчика 2
-pc4 - вход с потенциометра 2
-pc3 - вход кнопка 2, Pull-up
+pc4 - вход кнопка 2, Pull-up, плюс
+pc3 - вход кнопка 3, Pull-up, минус
 */
 
-#define flash_version 25
+#define flash_version 26
 
 #pragma location=0x4000
 __no_init uint8_t flashReady;
@@ -21,13 +21,18 @@ __no_init uint8_t minutesCount;
 __no_init uint16_t startUptime;
 #pragma location=0x4004
 __no_init uint16_t fallUptime;
+#pragma location=0x4006
+__no_init uint8_t maxPower;
 
-
+//const uint8_t 
 uint8_t lastIR1 = 0;
 uint8_t lastIR2 = 0;
 uint8_t lastBut1 = 0;
 uint8_t lastBut2 = 0;
-uint8_t maxPower = 20;
+uint8_t lastB1 = 0;
+uint8_t lastB2 = 0;
+uint8_t lastB3 = 0;
+
 
 uint16_t counter = 0;
 
@@ -63,7 +68,7 @@ int main( void )
   
   //setup inputs
   PC_DDR = 0;//all input
-  PC_CR1 = 0x11; //0b00010001;//pullup on pc3, pc7
+  PC_CR1 = 0x8A; //0b01001100;//pullup on pc3, pc4, pc7
   
   //setup outputs
   PB_DDR_DDR5 = 1;
@@ -110,6 +115,7 @@ int main( void )
     minutesCount = 1;
     startUptime = 40;
     fallUptime = 40;
+    maxPower = 20;
     flashReady = flash_version;
   }
   
@@ -121,13 +127,26 @@ int main( void )
   uint8_t run2 = 0;
   uint8_t fallCounter1 = 0;
   uint8_t fallCounter2 = 0;
+  uint8_t settingsCounter = 0;
+  uint8_t b1Pressed = 0;
+  uint8_t b2Pressed = 0;
+  uint8_t b3Pressed = 0;
+  uint16_t pwm1 = 0;
+  uint16_t pwm2 = 0;
+  uint8_t temp = 0;
+  uint8_t menuMode = 0;
+  if (PC_IDR_IDR7)//failsafe on startup
+  {
+    maxPower = 0;
+    lastB1 = 1;//no menu enter
+  }
   while (1)
   {
-    uint8_t ir1 = PC_IDR_IDR6;
-    uint8_t ir2 = PC_IDR_IDR5;
-    if (ir1 != lastIR1)
+    //sensors detector
+    temp = PC_IDR_IDR6;
+    if (temp != lastIR1)
     {
-      if (ir1)
+      if (temp)
       {
         run1 = 1;
         fallCounter1 = 0;
@@ -135,79 +154,144 @@ int main( void )
           time1 = startUptime;
       }
     }
-    if (ir2 != lastIR2)
+    lastIR1 = temp;
+    temp = PC_IDR_IDR5;
+    if (temp != lastIR2)
     {
-      if (ir2 && time2 == 0)
+      if (temp && time2 == 0)
         run2 = 1;
     }
-    
-    lastIR1 = ir1;
-    lastIR2 = ir2;
-    
-    
-    if (counter > 200)
+    lastIR2 = temp;
+    //button press detector
+    temp = PC_IDR_IDR7;
+    if (temp != lastB1)
+      b1Pressed = 1;
+    lastB1 = temp;
+    temp = PC_IDR_IDR4;
+    if (temp != lastB2)
+      b2Pressed = 1;
+    lastB2 = temp;
+    temp = PC_IDR_IDR3;
+    if (temp != lastB3)
+      b3Pressed = 1;
+    lastB3 = temp;
+    //logic
+    if (counter < 200)
     {
-      counter = 0;
-      PB_ODR_ODR5 = !PB_ODR_ODR5;
-      if (run1 != 0)
+      counter++;
+      continue;
+    }
+    counter = 0;
+    PB_ODR_ODR5 = !PB_ODR_ODR5;
+    if (run1 != 0)
+    {
+      time1++;
+      if (time1 < startUptime)
       {
-        time1++;
-        if (time1 < startUptime)
-        {
-          outChannel1(time1 * maxPower / startUptime);
-        }
-        else if (time1 > 10 * 60 * minutesCount)
-        {
-          run1 = 0;
-          time1 = 0;
-          fallCounter1 = fallUptime;
-        }
-      } 
-      else if (fallCounter1 > 0)
-      {
-        outChannel1(fallCounter1 * maxPower / fallUptime);
-        fallCounter1--;
-        if (fallCounter1 == 0)
-          outChannel1(0);
+        pwm1 = time1 * maxPower / startUptime;
       }
-      if (run2 != 0)
+      else if (time1 > 10 * 60 * minutesCount)
       {
-        time2++;
-        if (time2 < startUptime)
-          outChannel2(time2 * maxPower / startUptime);
-        else if (time2 > 10 * 60 * minutesCount)
-        {
-          run2 = 0;
-          time2 = 0;
-          fallCounter2 = fallUptime;
-        }
-      } 
-      else if (fallCounter2 > 0)
+        run1 = 0;
+        time1 = 0;
+        fallCounter1 = fallUptime;
+      }
+    } 
+    else if (fallCounter1 > 0)
+    {
+      pwm1 = fallCounter1 * maxPower / fallUptime;
+      fallCounter1--;
+      if (fallCounter1 == 0)
+        pwm1 = 0;
+    }
+    if (run2 != 0)
+    {
+      time2++;
+      if (time2 < startUptime)
+        pwm2 = time2 * maxPower / startUptime;
+      else if (time2 > 10 * 60 * minutesCount)
       {
-        outChannel2(fallCounter2 * maxPower / fallUptime);
-        fallCounter2--;
-        if (fallCounter2 == 0)
-          outChannel2(0);
+        run2 = 0;
+        time2 = 0;
+        fallCounter2 = fallUptime;
+      }
+    } 
+    else if (fallCounter2 > 0)
+    {
+      pwm2 = fallCounter2 * maxPower / fallUptime;
+      fallCounter2--;
+      if (fallCounter2 == 0)
+        pwm2 = 0;
+    }
+    if (b1Pressed)
+    {
+      if (menuMode < 4)
+        menuMode++;
+      else
+        menuMode = 1;
+      settingsCounter = 100;
+    }
+    if (settingsCounter == 0) {
+      if (b2Pressed == 1)
+      {
+        if (maxPower < 255)
+          maxPower++;
+        b2Pressed = 0;
+      }
+      if (b3Pressed == 1)
+      {
+        if (maxPower > 0)
+          maxPower--;
+        b3Pressed = 0;
       }
     }
     else
-    {
-      counter++;
+    {//in system menu, no sensor effect;
+      settingsCounter--;
+      if (settingsCounter == 0)
+      {
+        menuMode = 0;
+      }
+      if (b2Pressed == 1)
+      {
+        if (menuMode == 1)
+        {
+          if (minutesCount < 10)
+            minutesCount++;
+        } 
+        else if (menuMode == 2)
+        {
+          if (startUptime < 100)
+            startUptime++;
+        } 
+        else if (menuMode == 3)
+        {
+          if (fallUptime < 100)
+            fallUptime++;
+        }
+      }
+      else if (b3Pressed == 1)
+      {
+        if (menuMode == 1)
+        {
+          if (minutesCount > 1)
+            minutesCount--;
+        } 
+        else if (menuMode == 2)
+        {
+          if (startUptime > 1)
+            startUptime--;
+        } 
+        else if (menuMode == 3)
+        {
+          if (fallUptime > 1)
+            fallUptime--;
+        }
+      }
     }
+    outChannel1(pwm1);
+    outChannel2(pwm2);
   }
   
   return 0;
 }
-//
-//#pragma vector = TIM1_OVR_UIF_vector
-//__interrupt void TIM1_OVR_UIF(void)
-//{
-//  TIM1_SR1_bit.UIF = 0;
-//  //timCounter++;
-//}
-//
-//#pragma vector = 7
-//__interrupt void EXTI_PORTC_IRQHandler(void)
-//{  
-//  //mirfIrq = 1; 
-//}
