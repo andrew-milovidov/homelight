@@ -32,18 +32,21 @@ uint8_t lastBut2 = 0;
 uint8_t lastB1 = 0;
 uint8_t lastB2 = 0;
 uint8_t lastB3 = 0;
-
-
 uint16_t counter = 0;
+uint8_t currentItem = 0;
+uint8_t menuArray[32] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+uint8_t menuArrayLen = 0;
+uint8_t menuArrayCurrent = 0;
+uint8_t menuArrayCounter = 0;
 
-void delay100ms()
-{
-  uint16_t i;
-  for(i = 0; i < 5000; i++)
-  {
-    asm("nop");
-  }
-}
+//void delay100ms()
+//{
+//  uint16_t i;
+//  for(i = 0; i < 5000; i++)
+//  {
+//    asm("nop");
+//  }
+//}
 
 void outChannel1(uint16_t pwr)
 {
@@ -58,6 +61,29 @@ void outChannel2(uint16_t pwr)
 void startADC()
 {
   ADC_CR1_ADON = 1;
+}
+
+void fillMenu(uint8_t menuNum, uint8_t value)
+{
+  uint8_t i = 0;
+  uint8_t k = 0;
+  menuArrayLen = 2 + value * 2;
+  for (i = 0; i < value; i++)
+  {
+    menuArray[k] = 3;
+    k++;
+    menuArray[k] = 4;
+    k++;
+  }
+  for (i = 0; i < value; i++)
+  {
+    menuArray[k] = 1;
+    k++;
+    menuArray[k] = 3;
+    k++;
+  }
+  menuArrayCurrent = 0;
+  menuArrayCounter = 0;
 }
 
 int main( void )
@@ -103,8 +129,6 @@ int main( void )
   CLK_PCKENR2 |= 4;//PCKEN23 - enable ADC1
   ADC_CSR_CH = 3;
   
-  
-  
   //setup flash
   FLASH_DUKR = 0xAE;
   FLASH_DUKR = 0x56; 
@@ -127,7 +151,7 @@ int main( void )
   uint8_t run2 = 0;
   uint8_t fallCounter1 = 0;
   uint8_t fallCounter2 = 0;
-  uint8_t settingsCounter = 0;
+  uint16_t settingsCounter = 0;
   uint8_t b1Pressed = 0;
   uint8_t b2Pressed = 0;
   uint8_t b3Pressed = 0;
@@ -229,7 +253,7 @@ int main( void )
         menuMode++;
       else
         menuMode = 1;
-      settingsCounter = 100;
+      settingsCounter = 300;
     }
     if (settingsCounter == 0) {
       if (b2Pressed == 1)
@@ -252,7 +276,14 @@ int main( void )
       {
         menuMode = 0;
       }
-      if (b2Pressed == 1)
+      if (b1Pressed)
+      {
+        if (menuMode == 0 || menuMode > 2)
+          menuMode = 1;
+        else 
+          menuMode++;
+      }
+      else if (b2Pressed)
       {
         if (menuMode == 1)
         {
@@ -270,7 +301,7 @@ int main( void )
             fallUptime++;
         }
       }
-      else if (b3Pressed == 1)
+      else if (b3Pressed)
       {
         if (menuMode == 1)
         {
@@ -288,10 +319,38 @@ int main( void )
             fallUptime--;
         }
       }
+      if (b1Pressed || b2Pressed || b3Pressed)
+      {
+        fillMenu(menuMode, menuMode == 1 ? minutesCount : (menuMode == 2 ? startUptime : fallUptime));
+        b1Pressed = 0;
+        b2Pressed = 0;
+        b3Pressed = 0;
+      } 
+      else 
+      {
+        if (menuArrayCurrent < menuArrayLen)
+        {
+          uint8_t v = menuArray[menuArrayCurrent];
+          pwm1 = menuArrayCurrent % 2 == 0 ? 0 : maxPower;
+          if (menuArrayCounter < v)
+          {
+            menuArrayCounter++;
+          } 
+          else 
+          {
+            menuArrayCurrent++;
+            menuArrayCounter = 0;
+          }
+        } 
+        else
+        {
+          menuArrayCurrent = 0;
+          pwm1 = 0;
+        }
+      }
+      pwm2 = 0;
     }
     outChannel1(pwm1);
     outChannel2(pwm2);
   }
-  
-  return 0;
 }
