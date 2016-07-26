@@ -1,17 +1,23 @@
 #include "iostm8s103f3.h"
 #include "stdint.h"
+
 /*
-pd4 - выход 2
-pd3 - выход 1
-pd2 - резерв
-pc7 - вход кнопка 1, Pull-up, меню
-pc6 - вход с датчика 1
-pc5 - вход с датчика 2
-pc4 - вход кнопка 2, Pull-up, плюс
-pc3 - вход кнопка 3, Pull-up, минус
+pd4 - output 2
+pd3 - output 1
+pd2 - reserved, not used
+pc7 - input button 1, Pull-up, menu
+pc6 - input sensor 1
+pc5 - input sensor 2
+pc4 - input button 2, Pull-up, plus
+pc3 - input button 3, Pull-up, minus
 */
 
-#define flash_version 26
+#define flash_version 27
+#define MAX_POWER 20
+#define MAX_MINUTES 10
+#define SETTINGS_COUNTER 300
+#define MAX_RISE_FALLTIME 100
+#define WAIT_COUNTER 200
 
 #pragma location=0x4000
 __no_init uint8_t flashReady;
@@ -24,7 +30,6 @@ __no_init uint16_t fallUptime;
 #pragma location=0x4006
 __no_init uint8_t maxPower;
 
-//const uint8_t 
 uint8_t lastIR1 = 0;
 uint8_t lastIR2 = 0;
 uint8_t lastBut1 = 0;
@@ -34,19 +39,10 @@ uint8_t lastB2 = 0;
 uint8_t lastB3 = 0;
 uint16_t counter = 0;
 uint8_t currentItem = 0;
-uint8_t menuArray[32] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+uint8_t menuArray[256];
 uint8_t menuArrayLen = 0;
 uint8_t menuArrayCurrent = 0;
 uint8_t menuArrayCounter = 0;
-
-//void delay100ms()
-//{
-//  uint16_t i;
-//  for(i = 0; i < 5000; i++)
-//  {
-//    asm("nop");
-//  }
-//}
 
 void outChannel1(uint16_t pwr)
 {
@@ -58,21 +54,16 @@ void outChannel2(uint16_t pwr)
   TIM2_CCR2L = (pwr & 0xFF);
 }
 
-void startADC()
-{
-  ADC_CR1_ADON = 1;
-}
-
 void fillMenu(uint8_t menuNum, uint8_t value)
 {
   uint8_t i = 0;
   uint8_t k = 0;
   menuArrayLen = 2 + value * 2;
-  for (i = 0; i < value; i++)
+  for (i = 0; i < menuNum; i++)
   {
-    menuArray[k] = 3;
+    menuArray[k] = 6;
     k++;
-    menuArray[k] = 4;
+    menuArray[k] = 2;
     k++;
   }
   for (i = 0; i < value; i++)
@@ -94,7 +85,10 @@ int main( void )
   
   //setup inputs
   PC_DDR = 0;//all input
-  PC_CR1 = 0x8A; //0b01001100;//pullup on pc3, pc4, pc7
+  PC_CR1 = 0; //0b01001100;//pullup on pc3, pc4, pc7
+  PC_CR1_C17 = 1;
+  PC_CR1_C14 = 1;
+  PC_CR1_C13 = 1;
   
   //setup outputs
   PB_DDR_DDR5 = 1;
@@ -123,11 +117,7 @@ int main( void )
   outChannel1(0);
   outChannel2(0);
   TIM2_CR1_CEN = 1;
-  
   TIM2_CCER1_CC1P = 0;
-  //setup adc
-  CLK_PCKENR2 |= 4;//PCKEN23 - enable ADC1
-  ADC_CSR_CH = 3;
   
   //setup flash
   FLASH_DUKR = 0xAE;
@@ -137,14 +127,20 @@ int main( void )
   if (flashReady != flash_version) //check version of stored settings. every shema change flashReady must be updated
   {
     minutesCount = 1;
-    startUptime = 40;
-    fallUptime = 40;
-    maxPower = 20;
+    startUptime = 5;
+    fallUptime = 5;
+    maxPower = 3;
     flashReady = flash_version;
+  } 
+  else 
+  {
+    if (maxPower > MAX_POWER)
+      maxPower = MAX_POWER;
+    if (minutesCount > MAX_MINUTES)
+      minutesCount = MAX_MINUTES;
   }
   
   //start 
-  //asm("rim");
   uint16_t time1 = 0;
   uint16_t time2 = 0;
   uint8_t run1 = 0;
@@ -159,7 +155,7 @@ int main( void )
   uint16_t pwm2 = 0;
   uint8_t temp = 0;
   uint8_t menuMode = 0;
-  if (PC_IDR_IDR7)//failsafe on startup
+  if (PC_IDR_IDR7 == 0)//failsafe on startup
   {
     maxPower = 0;
     lastB1 = 1;//no menu enter
@@ -188,19 +184,19 @@ int main( void )
     lastIR2 = temp;
     //button press detector
     temp = PC_IDR_IDR7;
-    if (temp != lastB1)
+    if (temp != lastB1 && temp == 0)
       b1Pressed = 1;
     lastB1 = temp;
     temp = PC_IDR_IDR4;
-    if (temp != lastB2)
+    if (temp != lastB2 && temp == 0)
       b2Pressed = 1;
     lastB2 = temp;
     temp = PC_IDR_IDR3;
-    if (temp != lastB3)
+    if (temp != lastB3 && temp == 0)
       b3Pressed = 1;
     lastB3 = temp;
     //logic
-    if (counter < 200)
+    if (counter < WAIT_COUNTER)
     {
       counter++;
       continue;
@@ -220,6 +216,10 @@ int main( void )
         time1 = 0;
         fallCounter1 = fallUptime;
       }
+      else
+      {
+        pwm1 = maxPower;
+      }
     } 
     else if (fallCounter1 > 0)
     {
@@ -227,6 +227,10 @@ int main( void )
       fallCounter1--;
       if (fallCounter1 == 0)
         pwm1 = 0;
+    }
+    else
+    {
+      pwm1 = 0;
     }
     if (run2 != 0)
     {
@@ -239,6 +243,10 @@ int main( void )
         time2 = 0;
         fallCounter2 = fallUptime;
       }
+      else
+      {
+        pwm2 = maxPower;
+      }
     } 
     else if (fallCounter2 > 0)
     {
@@ -247,18 +255,20 @@ int main( void )
       if (fallCounter2 == 0)
         pwm2 = 0;
     }
+    else
+    {
+      pwm2 = 0;
+    }
     if (b1Pressed)
     {
-      if (menuMode < 4)
-        menuMode++;
-      else
-        menuMode = 1;
-      settingsCounter = 300;
+      if (settingsCounter == 0)
+        menuMode = 0;
+      settingsCounter = SETTINGS_COUNTER;
     }
     if (settingsCounter == 0) {
       if (b2Pressed == 1)
       {
-        if (maxPower < 255)
+        if (maxPower < MAX_POWER)
           maxPower++;
         b2Pressed = 0;
       }
@@ -287,17 +297,17 @@ int main( void )
       {
         if (menuMode == 1)
         {
-          if (minutesCount < 10)
+          if (minutesCount < MAX_MINUTES)
             minutesCount++;
         } 
         else if (menuMode == 2)
         {
-          if (startUptime < 100)
+          if (startUptime < MAX_RISE_FALLTIME)
             startUptime++;
         } 
         else if (menuMode == 3)
         {
-          if (fallUptime < 100)
+          if (fallUptime < MAX_RISE_FALLTIME)
             fallUptime++;
         }
       }
@@ -331,7 +341,7 @@ int main( void )
         if (menuArrayCurrent < menuArrayLen)
         {
           uint8_t v = menuArray[menuArrayCurrent];
-          pwm1 = menuArrayCurrent % 2 == 0 ? 0 : maxPower;
+          pwm1 = menuArrayCurrent % 2 == 0 ? maxPower : 0;
           if (menuArrayCounter < v)
           {
             menuArrayCounter++;
