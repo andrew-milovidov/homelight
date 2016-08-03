@@ -12,12 +12,14 @@ pc4 - input button 2, Pull-up, plus
 pc3 - input button 3, Pull-up, minus
 */
 
-#define flash_version 27
+#define flash_version 29
 #define MAX_POWER 20
 #define MAX_MINUTES 10
 #define SETTINGS_COUNTER 300
 #define MAX_RISE_FALLTIME 100
 #define WAIT_COUNTER 200
+#define ENABLE_MENU 0
+#define ENABLE_BUTTONS 1
 
 #pragma location=0x4000
 __no_init uint8_t flashReady;
@@ -34,9 +36,9 @@ uint8_t lastIR1 = 0;
 uint8_t lastIR2 = 0;
 uint8_t lastBut1 = 0;
 uint8_t lastBut2 = 0;
-uint8_t lastB1 = 0;
-uint8_t lastB2 = 0;
-uint8_t lastB3 = 0;
+uint8_t lastB1 = 1;
+uint8_t lastB2 = 1;
+uint8_t lastB3 = 1;
 uint16_t counter = 0;
 uint8_t currentItem = 0;
 uint8_t menuArray[256];
@@ -85,10 +87,10 @@ int main( void )
   
   //setup inputs
   PC_DDR = 0;//all input
-  PC_CR1 = 0; //0b01001100;//pullup on pc3, pc4, pc7
-  PC_CR1_C17 = 1;
-  PC_CR1_C14 = 1;
-  PC_CR1_C13 = 1;
+  PC_CR1 = 0x00; //0b01001100;//pullup on pc3, pc4, pc7
+  //PC_CR1_C17 = 1;
+  //PC_CR1_C14 = 1;
+  //PC_CR1_C13 = 1;
   
   //setup outputs
   PB_DDR_DDR5 = 1;
@@ -126,10 +128,10 @@ int main( void )
     ;
   if (flashReady != flash_version) //check version of stored settings. every shema change flashReady must be updated
   {
-    minutesCount = 1;
-    startUptime = 5;
-    fallUptime = 5;
-    maxPower = 3;
+    minutesCount = 3;
+    startUptime = 30;
+    fallUptime = 30;
+    maxPower = 4;
     flashReady = flash_version;
   } 
   else 
@@ -158,7 +160,7 @@ int main( void )
   if (PC_IDR_IDR7 == 0)//failsafe on startup
   {
     maxPower = 0;
-    lastB1 = 1;//no menu enter
+    lastB1 = 0;//no menu enter
   }
   while (1)
   {
@@ -182,19 +184,22 @@ int main( void )
         run2 = 1;
     }
     lastIR2 = temp;
-    //button press detector
-    temp = PC_IDR_IDR7;
-    if (temp != lastB1 && temp == 0)
-      b1Pressed = 1;
-    lastB1 = temp;
-    temp = PC_IDR_IDR4;
-    if (temp != lastB2 && temp == 0)
-      b2Pressed = 1;
-    lastB2 = temp;
-    temp = PC_IDR_IDR3;
-    if (temp != lastB3 && temp == 0)
-      b3Pressed = 1;
-    lastB3 = temp;
+    if (ENABLE_BUTTONS)
+    {
+      //button press detector
+      temp = PC_IDR_IDR7;
+      if (temp != lastB1 && temp == 0)
+        b1Pressed = 1;
+      lastB1 = temp;
+      temp = PC_IDR_IDR4;
+      if (temp != lastB2 && temp == 0)
+        b2Pressed = 1;
+      lastB2 = temp;
+      temp = PC_IDR_IDR3;
+      if (temp != lastB3 && temp == 0)
+        b3Pressed = 1;
+      lastB3 = temp;
+    }
     //logic
     if (counter < WAIT_COUNTER)
     {
@@ -265,7 +270,7 @@ int main( void )
         menuMode = 0;
       settingsCounter = SETTINGS_COUNTER;
     }
-    if (settingsCounter == 0) {
+    if (ENABLE_MENU == 0 || settingsCounter == 0) {
       if (b2Pressed == 1)
       {
         if (maxPower < MAX_POWER)
